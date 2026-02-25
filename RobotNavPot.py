@@ -71,7 +71,7 @@ for t in simu.t:
         potentialValue = pot.value([robot.x, robot.y])
         
         # velocity control input
-        Vr = 0.0
+        Vr = 2.0
         
         
         # reference orientation
