@@ -22,7 +22,7 @@ robot = rob.Robot(x0, y0, theta0)
 
 
 # potential
-pot = Potential.Potential(difficulty=2, random=False)
+pot = Potential.Potential(difficulty=2, random=True)
 
 
 # position control loop: gain and timer
@@ -65,6 +65,7 @@ target_y = 0.0
 max_global = -100.0
 indices = None
 final_maxima = []
+targets_to_visit = []
 
 
 # loop on simulation time
@@ -123,34 +124,39 @@ for t in simu.t:
                     if is_new:
                         final_maxima.append([mx, my])
                 
-                # Trouver l'indice du pic le plus proche physiquement du robot
-                dists = np.sqrt((simu.x[indices] - robot.x)**2 + (simu.y[indices] - robot.y)**2)
-                best_idx_local = np.argmin(dists)
-                best_idx = indices[best_idx_local]
+                targets_to_visit = list(final_maxima)
                 
-                # Définir la cible et l'état
-                target_x = simu.x[best_idx]
-                target_y = simu.y[best_idx]
-                max_global = valid_potential[best_idx]
-                
-                firstScan = True
-                approachingMax = True
+                if len(targets_to_visit) > 0:
+                    # Trouver le pic le plus proche physiquement du robot
+                    dists = [math.sqrt((p[0] - robot.x)**2 + (p[1] - robot.y)**2) for p in targets_to_visit]
+                    best_idx_local = np.argmin(dists)
+                    target = targets_to_visit.pop(best_idx_local)
+                    
+                    # Définir la cible et l'état
+                    target_x = target[0]
+                    target_y = target[1]
+                    
+                    firstScan = True
+                    approachingMax = True
+                else:
+                    Vr = 0.0
         else:
             if approachingMax:
                 # Aller vers le maximum local identifié
                 theta0 = math.atan2(target_y - robot.y, target_x - robot.x)
                 dist_to_target = math.sqrt((robot.x - target_x)**2 + (robot.y - target_y)**2)
-                if dist_to_target < 1.0:
-                    approachingMax = False
+                if dist_to_target < 0.5:
+                    if len(targets_to_visit) > 0:
+                        dists = [math.sqrt((p[0] - robot.x)**2 + (p[1] - robot.y)**2) for p in targets_to_visit]
+                        best_idx_local = np.argmin(dists)
+                        target = targets_to_visit.pop(best_idx_local)
+                        target_x = target[0]
+                        target_y = target[1]
+                    else:
+                        approachingMax = False
+                        Vr = 0.0
             else:
-                # Déplacement perpendiculaire au premier segment (angle 3pi/4)
-                theta0 = 3.0 * math.pi / 4.0
-                
-                # Arrêt au maximum (si le potentiel commence à baisser significativement)
-                if potentialValue > max_global:
-                    max_global = potentialValue
-                elif potentialValue < max_global - 0.05:
-                    Vr = 0.0
+                Vr = 0.0
         
         
         if math.fabs(robot.theta-thetar)>math.pi:
