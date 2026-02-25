@@ -12,6 +12,7 @@ import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 import Timer as tmr
 import Potential
+from scipy.signal import find_peaks
 
 # robot
 x0 = -20.0
@@ -21,7 +22,7 @@ robot = rob.Robot(x0, y0, theta0)
 
 
 # potential
-pot = Potential.Potential(difficulty=1, random=False)
+pot = Potential.Potential(difficulty=2, random=False)
 
 
 # position control loop: gain and timer
@@ -57,7 +58,13 @@ thetar = 0.0
 omegar = 0.0
 
 firstIter = True
-
+firstScan = False
+approachingMax = False
+target_x = 0.0
+target_y = 0.0
+max_global = -100.0
+indices = None
+final_maxima = []
 
 
 # loop on simulation time
@@ -74,8 +81,76 @@ for t in simu.t:
         Vr = 2.0
         
         
-        # reference orientation
         thetar = theta0
+        if firstScan == False:
+
+            dCheck1 = math.sqrt((robot.x - 20)**2 + (robot.y - 20)**2)
+            dCheck2 = math.sqrt((robot.x - -20)**2 + (robot.y - 20)**2)
+            dCheck3 = math.sqrt((robot.x - 20)**2 + (robot.y - -20)**2)
+            # reference orientation
+            if dCheck1 < 1.0:
+                theta0 = math.atan2(20 - robot.y, -20 - robot.x)
+            if dCheck2 < 1.0:
+                theta0 = math.atan2(-20 - robot.y, 20 - robot.x)
+            if dCheck3 < 1.0:
+                # Récupération des données valides (sans les NaN de fin de tableau)
+                valid_potential = simu.potential[0:simu.currentIndex]
+                indices, _ = find_peaks(valid_potential)
+                
+                # Descente de gradient pour affiner la position des maximums
+                for idx in indices:
+                    mx = simu.x[idx]
+                    my = simu.y[idx]
+                    
+                    # Gradient ascent (montée de gradient)
+                    for _ in range(50):
+                        delta = 0.01
+                        grad_x = (pot.value([mx + delta, my]) - pot.value([mx - delta, my])) / (2 * delta)
+                        grad_y = (pot.value([mx, my + delta]) - pot.value([mx, my - delta])) / (2 * delta)
+                        
+                        mx += 0.2 * grad_x
+                        my += 0.2 * grad_y
+                        
+                        if (grad_x**2 + grad_y**2) < 0.001:
+                            break
+                    
+                    # Ajout si nouveau maximum (filtre les doublons)
+                    is_new = True
+                    for p in final_maxima:
+                        if math.sqrt((mx - p[0])**2 + (my - p[1])**2) < 1.0:
+                            is_new = False
+                            break
+                    if is_new:
+                        final_maxima.append([mx, my])
+                
+                # Trouver l'indice du pic le plus proche physiquement du robot
+                dists = np.sqrt((simu.x[indices] - robot.x)**2 + (simu.y[indices] - robot.y)**2)
+                best_idx_local = np.argmin(dists)
+                best_idx = indices[best_idx_local]
+                
+                # Définir la cible et l'état
+                target_x = simu.x[best_idx]
+                target_y = simu.y[best_idx]
+                max_global = valid_potential[best_idx]
+                
+                firstScan = True
+                approachingMax = True
+        else:
+            if approachingMax:
+                # Aller vers le maximum local identifié
+                theta0 = math.atan2(target_y - robot.y, target_x - robot.x)
+                dist_to_target = math.sqrt((robot.x - target_x)**2 + (robot.y - target_y)**2)
+                if dist_to_target < 1.0:
+                    approachingMax = False
+            else:
+                # Déplacement perpendiculaire au premier segment (angle 3pi/4)
+                theta0 = 3.0 * math.pi / 4.0
+                
+                # Arrêt au maximum (si le potentiel commence à baisser significativement)
+                if potentialValue > max_global:
+                    max_global = potentialValue
+                elif potentialValue < max_global - 0.05:
+                    Vr = 0.0
         
         
         if math.fabs(robot.theta-thetar)>math.pi:
@@ -86,7 +161,7 @@ for t in simu.t:
     # orientation control loop
     if timerOrientationCtrl.isEllapsed(t):
         # angular velocity control input        
-        omegar = 0.0
+        omegar = kpOrient * (thetar - robot.theta)
     
     
     # assign control inputs to robot
@@ -106,8 +181,10 @@ for t in simu.t:
 # close all figures
 plt.close("all")
 
+print("Liste des maximums affinés par gradient :", final_maxima)
+
 # generate plots
-fig,ax = simu.plotXY(1)
+fig,ax = simu.plotXY(1, indices=indices)
 pot.plot(noFigure=None, fig=fig, ax=ax)  # plot potential for verification of solution
 
 simu.plotXYTheta(2)
@@ -174,4 +251,3 @@ simu.plotPotential3D(5)
 # #interval=25
 
 # #ani.save('robot.mp4', fps=15)
-
