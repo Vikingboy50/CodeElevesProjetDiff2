@@ -22,7 +22,7 @@ robot = rob.Robot(x0, y0, theta0)
 
 
 # potential
-pot = Potential.Potential(difficulty=2, random=False)
+pot = Potential.Potential(difficulty=2, random=True)
 
 
 # position control loop: gain and timer
@@ -59,7 +59,7 @@ omegar = 0.0
 
 # State Machine Variables
 state = 0 # 0: Scan, 1: Approach, 2: Climb, 3: Finished
-climb_state = 0 # 0: Orient, 1: Move, 2: Check, 3: Return
+climb_state = 0 # 0: Orient x, 1: Move x, 2: Orient return x, 3: Move return x, 4: Orient y, 5: Move y, 6: Orient return y, 7: Move return y
 
 indices = None
 targets_to_visit = []
@@ -71,6 +71,8 @@ climb_best_pos = [0.0, 0.0]
 climb_start_pos = [0.0, 0.0]
 climb_angle = 0.0
 climb_fails = 0
+pot_x_val = 0.0
+pot_y_val = 0.0
 
 
 # loop on simulation time
@@ -126,57 +128,96 @@ for t in simu.t:
                     climb_state = 0
                     climb_best_pot = potentialValue
                     climb_best_pos = [robot.x, robot.y]
+                    climb_start_pos = [robot.x, robot.y]
                     climb_angle = 0.0
                     climb_fails = 0
 
         elif state == 2: # CLIMB (Gradient Ascent Physique)
-            if climb_state == 0: # Orient
+            probe_dist = 0.2
+            step_dist = 0.5
+            
+            if climb_state == 0: # orient to X probe
+                target = [climb_start_pos[0] + probe_dist, climb_start_pos[1]]
                 Vr = 0.0
-                thetar = climb_angle
-                # Check alignment
-                diff = climb_angle - robot.theta
-                if abs(math.atan2(math.sin(diff), math.cos(diff))) < 0.1:
-                    climb_state = 1
-                    climb_start_pos = [robot.x, robot.y]
-            
-            elif climb_state == 1: # Move
+                thetar = math.atan2(target[1] - robot.y, target[0] - robot.x)
+                if abs(math.atan2(math.sin(thetar - robot.theta), math.cos(thetar - robot.theta))) < 0.1:
+                    climb_state = 1 # Move to X probe
+
+            elif climb_state == 1: # Move to X probe
                 Vr = 1.0
-                thetar = climb_angle
-                dist = math.sqrt((robot.x - climb_start_pos[0])**2 + (robot.y - climb_start_pos[1])**2)
-                if dist > 0.5: # Step size
-                    climb_state = 2
-            
-            elif climb_state == 2: # Check
-                Vr = 0.0
-                if potentialValue > climb_best_pot:
-                    climb_best_pot = potentialValue
-                    climb_best_pos = [robot.x, robot.y]
-                    climb_fails = 0
-                    climb_state = 1 # Continue in same direction
-                    climb_start_pos = [robot.x, robot.y]
-                else:
-                    climb_fails += 1
-                    climb_state = 3 # Return
-            
-            elif climb_state == 3: # Return
-                Vr = 1.0
-                thetar = math.atan2(climb_best_pos[1] - robot.y, climb_best_pos[0] - robot.x)
-                dist = math.sqrt((robot.x - climb_best_pos[0])**2 + (robot.y - climb_best_pos[1])**2)
+                dist = math.sqrt((robot.x - target[0])**2 + (robot.y - target[1])**2)
                 if dist < 0.1:
-                    if climb_fails >= 4: # Tried all 4 directions
-                        final_maxima.append(climb_best_pos)
+                    pot_x_val = potentialValue
+                    climb_state = 2 # Return
+            
+            elif climb_state == 2: # Orient return from X
+                target = climb_start_pos
+                Vr = 0.0
+                thetar = math.atan2(target[1] - robot.y, target[0] - robot.x)
+                if abs(math.atan2(math.sin(thetar - robot.theta), math.cos(thetar - robot.theta))) < 0.1:
+                    climb_state = 3 # Move return from X probe
+
+            elif climb_state == 3: # Move return from X probe
+                Vr = 1.0
+                dist = math.sqrt((robot.x - target[0])**2 + (robot.y - target[1])**2)
+                if dist < 0.1:
+                    climb_state = 4 # Orient to Y probe
+
+
+            elif climb_state == 4: # orient to Y probe
+                target = [climb_start_pos[0], climb_start_pos[1] + probe_dist]
+                Vr = 0.0
+                thetar = math.atan2(target[1] - robot.y, target[0] - robot.x)
+                if abs(math.atan2(math.sin(thetar - robot.theta), math.cos(thetar - robot.theta))) < 0.1:
+                    climb_state = 5 # Move to Y probe
+
+            elif climb_state == 5: # Move to Y probe
+                Vr = 1.0
+                dist = math.sqrt((robot.x - target[0])**2 + (robot.y - target[1])**2)
+                if dist < 0.1:
+                    pot_x_val = potentialValue
+                    climb_state = 6 # Return
+            
+            elif climb_state == 6: # Orient return from Y
+                target = climb_start_pos
+                Vr = 0.0
+                thetar = math.atan2(target[1] - robot.y, target[0] - robot.x)
+                if abs(math.atan2(math.sin(thetar - robot.theta), math.cos(thetar - robot.theta))) < 0.1:
+                    climb_state = 7 # Move return from Y probe
+
+            elif climb_state == 7: # Move return from Y probe
+                Vr = 1.0
+                dist = math.sqrt((robot.x - target[0])**2 + (robot.y - target[1])**2)
+                if dist < 0.1:
+                    # Compute Gradient
+                    grad_x = (pot_x_val - climb_best_pot) / probe_dist
+                    grad_y = (pot_y_val - climb_best_pot) / probe_dist
+                    norm = math.sqrt(grad_x**2 + grad_y**2)
+                    
+                    if norm < 0.05: # Threshold for peak
+                        final_maxima.append(climb_start_pos)
                         current_target = None
                         state = 1 # Next target
                     else:
-                        climb_angle += math.pi/2
-                        climb_state = 0 # Try next angle
+                        climb_angle = math.atan2(grad_y, grad_x)
+                        climb_state = 8 # Move along gradient
+            
+            elif climb_state == 8: # Move along gradient
+                Vr = 1.0
+                thetar = climb_angle
+                dist = math.sqrt((robot.x - climb_start_pos[0])**2 + (robot.y - climb_start_pos[1])**2)
+                if dist > step_dist:
+                    climb_start_pos = [robot.x, robot.y]
+                    climb_best_pot = potentialValue
+                    climb_state = 0 # New cycle
         
         
         if math.fabs(robot.theta-thetar)>math.pi:
             thetar = thetar + math.copysign(2*math.pi,robot.theta)        
         
         
-        
+    print(f"climb_state: {climb_state}")  
+    print(f"state: {state}")  
     # orientation control loop
     if timerOrientationCtrl.isEllapsed(t):
         # angular velocity control input        
