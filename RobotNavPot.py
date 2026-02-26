@@ -22,7 +22,7 @@ robot = rob.Robot(x0, y0, theta0)
 
 
 # potential
-pot = Potential.Potential(difficulty=2, random=True)
+pot = Potential.Potential(difficulty=2, random=False)
 
 
 # position control loop: gain and timer
@@ -57,15 +57,20 @@ Vr = 0.0
 thetar = 0.0
 omegar = 0.0
 
-firstIter = True
-firstScan = False
-approachingMax = False
-target_x = 0.0
-target_y = 0.0
-max_global = -100.0
+# State Machine Variables
+state = 0 # 0: Scan, 1: Approach, 2: Climb, 3: Finished
+climb_state = 0 # 0: Orient, 1: Move, 2: Check, 3: Return
+
 indices = None
-final_maxima = []
 targets_to_visit = []
+final_maxima = []
+current_target = None
+
+climb_best_pot = -1000.0
+climb_best_pos = [0.0, 0.0]
+climb_start_pos = [0.0, 0.0]
+climb_angle = 0.0
+climb_fails = 0
 
 
 # loop on simulation time
@@ -78,85 +83,93 @@ for t in simu.t:
 
         potentialValue = pot.value([robot.x, robot.y])
         
-        # velocity control input
-        Vr = 2.0
+        # Default behavior
+        Vr = 0.0
         
-        
-        thetar = theta0
-        if firstScan == False:
-
+        if state == 0: # SCAN
+            Vr = 2.0
             dCheck1 = math.sqrt((robot.x - 20)**2 + (robot.y - 20)**2)
             dCheck2 = math.sqrt((robot.x - -20)**2 + (robot.y - 20)**2)
             dCheck3 = math.sqrt((robot.x - 20)**2 + (robot.y - -20)**2)
-            # reference orientation
+            
+            # Logic for triangle path
             if dCheck1 < 1.0:
                 theta0 = math.atan2(20 - robot.y, -20 - robot.x)
             if dCheck2 < 1.0:
                 theta0 = math.atan2(-20 - robot.y, 20 - robot.x)
             if dCheck3 < 1.0:
-                # Récupération des données valides (sans les NaN de fin de tableau)
+                # Scan finished
                 valid_potential = simu.potential[0:simu.currentIndex]
                 indices, _ = find_peaks(valid_potential)
-                
-                # Descente de gradient pour affiner la position des maximums
                 for idx in indices:
-                    mx = simu.x[idx]
-                    my = simu.y[idx]
-                    
-                    # Gradient ascent (montée de gradient)
-                    for _ in range(50):
-                        delta = 0.01
-                        grad_x = (pot.value([mx + delta, my]) - pot.value([mx - delta, my])) / (2 * delta)
-                        grad_y = (pot.value([mx, my + delta]) - pot.value([mx, my - delta])) / (2 * delta)
-                        
-                        mx += 0.2 * grad_x
-                        my += 0.2 * grad_y
-                        
-                        if (grad_x**2 + grad_y**2) < 0.001:
-                            break
-                    
-                    # Ajout si nouveau maximum (filtre les doublons)
-                    is_new = True
-                    for p in final_maxima:
-                        if math.sqrt((mx - p[0])**2 + (my - p[1])**2) < 1.0:
-                            is_new = False
-                            break
-                    if is_new:
-                        final_maxima.append([mx, my])
-                
-                targets_to_visit = list(final_maxima)
-                
+                    targets_to_visit.append([simu.x[idx], simu.y[idx]])
+                state = 1 # Approach
+            
+            thetar = theta0
+
+        elif state == 1: # APPROACH
+            if current_target is None:
                 if len(targets_to_visit) > 0:
-                    # Trouver le pic le plus proche physiquement du robot
+                    # Find closest
                     dists = [math.sqrt((p[0] - robot.x)**2 + (p[1] - robot.y)**2) for p in targets_to_visit]
-                    best_idx_local = np.argmin(dists)
-                    target = targets_to_visit.pop(best_idx_local)
-                    
-                    # Définir la cible et l'état
-                    target_x = target[0]
-                    target_y = target[1]
-                    
-                    firstScan = True
-                    approachingMax = True
+                    idx = np.argmin(dists)
+                    current_target = targets_to_visit.pop(idx)
                 else:
-                    Vr = 0.0
-        else:
-            if approachingMax:
-                # Aller vers le maximum local identifié
-                theta0 = math.atan2(target_y - robot.y, target_x - robot.x)
-                dist_to_target = math.sqrt((robot.x - target_x)**2 + (robot.y - target_y)**2)
-                if dist_to_target < 0.5:
-                    if len(targets_to_visit) > 0:
-                        dists = [math.sqrt((p[0] - robot.x)**2 + (p[1] - robot.y)**2) for p in targets_to_visit]
-                        best_idx_local = np.argmin(dists)
-                        target = targets_to_visit.pop(best_idx_local)
-                        target_x = target[0]
-                        target_y = target[1]
-                    else:
-                        approachingMax = False
-                        Vr = 0.0
-            else:
+                    state = 3 # Finished
+            
+            if current_target is not None:
+                Vr = 2.0
+                thetar = math.atan2(current_target[1] - robot.y, current_target[0] - robot.x)
+                dist = math.sqrt((robot.x - current_target[0])**2 + (robot.y - current_target[1])**2)
+                if dist < 0.5:
+                    state = 2 # Climb
+                    climb_state = 0
+                    climb_best_pot = potentialValue
+                    climb_best_pos = [robot.x, robot.y]
+                    climb_angle = 0.0
+                    climb_fails = 0
+
+        elif state == 2: # CLIMB (Gradient Ascent Physique)
+            if climb_state == 0: # Orient
                 Vr = 0.0
+                thetar = climb_angle
+                # Check alignment
+                diff = climb_angle - robot.theta
+                if abs(math.atan2(math.sin(diff), math.cos(diff))) < 0.1:
+                    climb_state = 1
+                    climb_start_pos = [robot.x, robot.y]
+            
+            elif climb_state == 1: # Move
+                Vr = 1.0
+                thetar = climb_angle
+                dist = math.sqrt((robot.x - climb_start_pos[0])**2 + (robot.y - climb_start_pos[1])**2)
+                if dist > 0.5: # Step size
+                    climb_state = 2
+            
+            elif climb_state == 2: # Check
+                Vr = 0.0
+                if potentialValue > climb_best_pot:
+                    climb_best_pot = potentialValue
+                    climb_best_pos = [robot.x, robot.y]
+                    climb_fails = 0
+                    climb_state = 1 # Continue in same direction
+                    climb_start_pos = [robot.x, robot.y]
+                else:
+                    climb_fails += 1
+                    climb_state = 3 # Return
+            
+            elif climb_state == 3: # Return
+                Vr = 1.0
+                thetar = math.atan2(climb_best_pos[1] - robot.y, climb_best_pos[0] - robot.x)
+                dist = math.sqrt((robot.x - climb_best_pos[0])**2 + (robot.y - climb_best_pos[1])**2)
+                if dist < 0.1:
+                    if climb_fails >= 4: # Tried all 4 directions
+                        final_maxima.append(climb_best_pos)
+                        current_target = None
+                        state = 1 # Next target
+                    else:
+                        climb_angle += math.pi/2
+                        climb_state = 0 # Try next angle
         
         
         if math.fabs(robot.theta-thetar)>math.pi:
