@@ -73,6 +73,9 @@ xStartLoop = 0.0
 yStartLoop = 0.0
 distance_from_entry = 0
 
+State = 0
+posMax = np.zeros((2,3))
+
 # loop on simulation time
 for t in simu.t: 
     if xStartLoop != 0 :
@@ -93,7 +96,8 @@ for t in simu.t:
             
         # Arret si gradient faible et potentiel élevé (sommet atteint)
         if grad_norm < 0.1 and potentialValue > 0 and maxLoc == False:
-            xPosMax, yPosMax = robot.x, robot.y
+            posMax[0,0] = robot.x
+            posMax[1,0] = robot.y
             maxLoc = True
             
         # vitesse plus faible lors de la mision 2 pour plus de précision et arret quand les deux objectifs sont atteint 
@@ -134,6 +138,31 @@ for t in simu.t:
         if firstLap == False :
             Vr = 0
         
+        if State==0:
+            XSearchList = np.copy(simu.x)
+            YSearchList = np.copy(simu.y)
+            # Filter XSearchList and YSearchList to keep only points where potential is approximately P_iso
+            mask = np.abs(simu.potential[:simu.currentIndex] - P_iso) < 3.0
+            XSearchList = XSearchList[:simu.currentIndex][mask]
+            YSearchList = YSearchList[:simu.currentIndex][mask]
+            XContour = XSearchList
+            YContour = YSearchList
+            xCercle = xStartLoop
+            yCercle = yStartLoop
+            if 0 in posMax:
+                d = np.sqrt((xCercle - posMax[0,0])**2 + (yCercle - posMax[1,0])**2)
+                # Calculate distances of all points in the filtered list to the localized maximum
+                distances_to_max = np.sqrt((XSearchList - posMax[0,0])**2 + (YSearchList - posMax[1,0])**2)
+                
+                # Remove points that are on the circle of radius d (approximately)
+                # We keep points where the distance to max is NOT close to d
+                mask_circle = np.abs(distances_to_max - d) > 0.1
+                XSearchList = XSearchList[mask_circle]
+                YSearchList = YSearchList[mask_circle]
+      
+
+            
+
         
         
         
@@ -155,7 +184,7 @@ for t in simu.t:
     simu.addData(robot, WPManager, Vr, thetar, omegar, pot.value([robot.x,robot.y]))
     
 # end of loop on simulation time
-print(f" la source du polluant est a x={xPosMax}, y={yPosMax}, et a une valeur de pot={pot.value([xPosMax, yPosMax])}")
+#print(f" la source du polluant est a x={xPosMax}, y={yPosMax}, et a une valeur de pot={pot.value([xPosMax, yPosMax])}")
 
 # close all figures
 plt.close("all")
@@ -172,3 +201,17 @@ simu.plotPotential(4)
 
 
 simu.plotPotential3D(5)
+
+
+# Generate 2D plot for XSearchList and YSearchList
+plt.figure(6)
+plt.clf()
+plt.plot(XSearchList, YSearchList, 'go', label='Search Points (P_iso)')
+plt.plot(posMax[0,0], posMax[1,0], 'r*', markersize=15, label='Localized Max')
+plt.xlabel('x (m)')
+plt.ylabel('y (m)')
+plt.title('Filtered Search Points at P_iso')
+plt.legend()
+plt.grid(True)
+plt.axis('equal')
+plt.pause(0.01)
