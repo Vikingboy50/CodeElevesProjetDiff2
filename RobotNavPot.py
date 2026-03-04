@@ -22,7 +22,7 @@ robot = rob.Robot(x0, y0, theta0)
 
 
 # potential
-pot = Potential.Potential(difficulty=2, random=True)
+pot = Potential.Potential(difficulty=2, random=False)
 
 
 # position control loop: gain and timer
@@ -138,8 +138,8 @@ for t in simu.t:
                     climb_fails = 0
 
         elif state == 2: # CLIMB (Gradient Ascent Physique)
-            probe_dist = 0.2
-            step_dist = 1.5
+            probe_dist = 0.5
+            step_dist = 0.2
             
             if climb_state == 0: # orient to X probe
                 climb_target = [climb_start_pos[0] + probe_dist, climb_start_pos[1]]
@@ -199,7 +199,7 @@ for t in simu.t:
                     grad_y = (pot_y_val - climb_best_pot) / probe_dist
                     norm = math.sqrt(grad_x**2 + grad_y**2)
                     
-                    if norm < 0.2: # Threshold for peak
+                    if norm < 0.3: # Threshold for peak
                         final_maxima.append(climb_start_pos)
                         current_target = None
                         state = 1 # Next target
@@ -263,7 +263,7 @@ simu.plotPotential3D(5)
 
 
 # show plots
-#plt.show()
+plt.show()
 
 
 
