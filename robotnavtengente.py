@@ -26,9 +26,9 @@ y0 = -20.0
 theta0 = np.pi/4.0
 robot = rob.Robot(x0, y0, theta0)
 P_iso = 250
-
+State = 0
 # potential
-pot = Potential.Potential(difficulty=3, random=True)
+pot = Potential.Potential(difficulty=3, random=False)
 
 
 # position control loop: gain and timer
@@ -56,7 +56,7 @@ t0 = 0.0
 tf = 200.0
 dt = 0.01
 simu = rob.RobotSimulation(robot, t0, tf, dt)
-
+n =0
 
 # initialize control inputs
 Vr = 0.0
@@ -68,13 +68,15 @@ maxLoc = False #Variable si on a valider la mission 1 (max localisé)
 firstLap = True
 LoopInit = False
 farCheck = False
-
+histo2 = []
 xStartLoop = 0.0
 yStartLoop = 0.0
+distance_from_entry = 0
 
 # loop on simulation time
 for t in simu.t: 
-   
+    if xStartLoop != 0 :
+        distance_from_entry = np.sqrt((xStartLoop - robot.x)**2+(yStartLoop-robot.y)**2)
 
 
     # position control loop
@@ -97,8 +99,21 @@ for t in simu.t:
         # vitesse plus faible lors de la mision 2 pour plus de précision et arret quand les deux objectifs sont atteint 
         if maxLoc == False:
             Vr = 2.0
+        elif maxLoc == True and LoopInit == False :
+            if potentialValue <= 250 :
+                xStartLoop = robot.x
+                yStartLoop = robot.y
+                LoopInit = True
+        elif maxLoc == True and LoopInit == True and firstLap == True:
+            n+=1
+            if n>=300 and distance_from_entry <= 0.1:
+                firstLap  = False
+                State = 1
+                
+            
+            
         elif maxLoc == True and firstLap == True:
-            Vr = 1
+            Vr = 2
         else:
             Vr = 0
          
@@ -115,6 +130,9 @@ for t in simu.t:
                 thetar = robot.theta
             else:
                 thetar = math.atan2(grad_y, grad_x)
+                
+        if firstLap == False :
+            Vr = 0
         
         
         
@@ -135,7 +153,6 @@ for t in simu.t:
 
     # store data to be plotted   
     simu.addData(robot, WPManager, Vr, thetar, omegar, pot.value([robot.x,robot.y]))
-    
     
 # end of loop on simulation time
 print(f" la source du polluant est a x={xPosMax}, y={yPosMax}, et a une valeur de pot={pot.value([xPosMax, yPosMax])}")
