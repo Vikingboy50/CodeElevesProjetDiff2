@@ -277,6 +277,18 @@ for i in range(num_sources_found):
     print(f"  Found {i+1}: ({source_positions[0,i]:.2f}, {source_positions[1,i]:.2f})")
 print("---------------------------------------------------\n")
 
+print("\n--- Mission Statistics ---")
+for i, source in enumerate(found_sources_log):
+    idx = source[0]
+    print(f"Source {i+1} found at t = {simu.t[idx]:.2f} s")
+
+if simu.currentIndex > 1:
+    dx = np.diff(simu.x[:simu.currentIndex])
+    dy = np.diff(simu.y[:simu.currentIndex])
+    dist_total = np.sum(np.sqrt(dx**2 + dy**2))
+    print(f"Total distance traveled: {dist_total:.2f} m")
+print("---------------------------------------------------\n")
+
 plt.close("all")
 
 # Figure 1: Trajectory
